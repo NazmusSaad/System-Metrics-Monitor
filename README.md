@@ -23,6 +23,11 @@ docker compose up --build
 - **Frontend**: [http://localhost:3000](http://localhost:3000)
 - **Backend API**: [http://localhost:8000/api/health](http://localhost:8000/api/health)
 
+## UI Preview
+![App screenshot](https://github.com/NazmusSaad/System-Metrics-Monitor/blob/master/system_metrics_v1_pic1.png)
+![App screenshot](https://github.com/NazmusSaad/System-Metrics-Monitor/blob/master/system_metrics_v1_pic2.png)
+
+
 ## Environment Variables
 
 | Variable | Default | Description |
