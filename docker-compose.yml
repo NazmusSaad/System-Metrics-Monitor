@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-metrics}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-metricspass}
+      POSTGRES_DB: ${POSTGRES_DB:-metrics_monitor}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-metrics}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://metrics:metricspass@db:5432/metrics_monitor}
+      COLLECTION_INTERVAL_SECONDS: ${COLLECTION_INTERVAL_SECONDS:-2}
+      MACHINE_NAME: ${MACHINE_NAME:-local}
+      CPU_WARN: ${CPU_WARN:-80}
+      CPU_CRIT: ${CPU_CRIT:-95}
+      MEM_WARN: ${MEM_WARN:-80}
+      MEM_CRIT: ${MEM_CRIT:-95}
+      DISK_WARN: ${DISK_WARN:-85}
+      DISK_CRIT: ${DISK_CRIT:-95}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
