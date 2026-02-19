@@ -45,3 +45,11 @@ export interface SummaryResponse {
     net_rx_bps: SummaryField;
     net_tx_bps: SummaryField;
 }
+
+export interface Host {
+    id: number;
+    host_key: string;
+    display_name: string;
+    created_at: string;
+    last_seen_at: string;
+}

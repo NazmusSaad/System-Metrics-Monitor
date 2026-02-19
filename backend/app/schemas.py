@@ -57,3 +57,38 @@ class SummaryResponse(BaseModel):
     disk_percent: SummaryField
     net_rx_bps: SummaryField
     net_tx_bps: SummaryField
+
+
+# --- V2 schemas ---
+
+class IngestPayload(BaseModel):
+    host_key: str
+    ts_utc: Optional[datetime] = None
+    cpu_percent: float
+    load_avg_1: Optional[float] = None
+    mem_used_bytes: float
+    mem_total_bytes: float
+    mem_percent: float
+    disk_used_bytes: float
+    disk_total_bytes: float
+    disk_percent: float
+    net_rx_bps: float = 0
+    net_tx_bps: float = 0
+    uptime_seconds: Optional[float] = None
+
+
+class IngestResponse(BaseModel):
+    status: str
+    host_key: str
+    sample_id: int
+
+
+class HostOut(BaseModel):
+    id: int
+    host_key: str
+    display_name: str
+    created_at: datetime
+    last_seen_at: datetime
+
+    class Config:
+        from_attributes = True

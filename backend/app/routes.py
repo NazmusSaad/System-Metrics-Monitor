@@ -1,13 +1,13 @@
 """API routes under /api."""
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.models import MetricsSample
+from app.models import MetricsSample, Host
 from app.schemas import (
     HealthResponse,
     LatestResponse,
@@ -16,6 +16,9 @@ from app.schemas import (
     MetricsRangeResponse,
     SummaryResponse,
     SummaryField,
+    IngestPayload,
+    IngestResponse,
+    HostOut,
 )
 from app.config import settings
 
@@ -47,6 +50,17 @@ def _compute_health(sample: MetricsSample) -> HealthBadge:
     return HealthBadge(overall=worst, cpu=cpu, mem=mem, disk=disk)
 
 
+async def _resolve_host_id(session: AsyncSession, host_key: Optional[str]) -> Optional[int]:
+    """Resolve host_key to host_id. Returns None if no host_key given (show all)."""
+    if not host_key:
+        return None
+    result = await session.execute(select(Host.id).where(Host.host_key == host_key))
+    host_id = result.scalar_one_or_none()
+    if host_id is None:
+        raise HTTPException(status_code=404, detail=f"Host '{host_key}' not found")
+    return host_id
+
+
 # ---------- 1) Health ----------
 @router.get("/health", response_model=HealthResponse)
 async def health():
@@ -55,10 +69,16 @@ async def health():
 
 # ---------- 2) Latest ----------
 @router.get("/metrics/latest", response_model=LatestResponse)
-async def metrics_latest(session: AsyncSession = Depends(get_session)):
-    result = await session.execute(
-        select(MetricsSample).order_by(MetricsSample.ts_utc.desc()).limit(1)
-    )
+async def metrics_latest(
+    session: AsyncSession = Depends(get_session),
+    host_key: Optional[str] = Query(None),
+):
+    q = select(MetricsSample).order_by(MetricsSample.ts_utc.desc()).limit(1)
+    host_id = await _resolve_host_id(session, host_key)
+    if host_id is not None:
+        q = q.where(MetricsSample.host_id == host_id)
+
+    result = await session.execute(q)
     sample = result.scalar_one_or_none()
     if sample is None:
         raise HTTPException(status_code=404, detail="No metrics collected yet")
@@ -84,6 +104,7 @@ async def metrics_range(
     from_: Optional[str] = Query(None, alias="from"),
     to: Optional[str] = None,
     step: Optional[int] = None,
+    host_key: Optional[str] = Query(None),
 ):
     now = datetime.now(timezone.utc)
     ts_from = _parse_iso(from_, "from") if from_ else now - timedelta(hours=1)
@@ -102,8 +123,11 @@ async def metrics_range(
         step_seconds = max(int(range_seconds / MAX_POINTS), 1)
         note = f"Step auto-increased to {step_seconds}s to stay within {MAX_POINTS} point limit."
 
-    # SQL bucket averaging
-    query = text("""
+    host_id = await _resolve_host_id(session, host_key)
+
+    # SQL bucket averaging with optional host filter
+    host_clause = "AND host_id = :host_id" if host_id is not None else ""
+    query = text(f"""
         SELECT
             (EXTRACT(EPOCH FROM ts_utc)::bigint / :step) * :step AS bucket,
             AVG(cpu_percent) AS cpu_percent,
@@ -118,16 +142,16 @@ async def metrics_range(
             AVG(net_tx_bps) AS net_tx_bps,
             AVG(uptime_seconds) AS uptime_seconds
         FROM metrics_samples
-        WHERE ts_utc >= :ts_from AND ts_utc <= :ts_to
+        WHERE ts_utc >= :ts_from AND ts_utc <= :ts_to {host_clause}
         GROUP BY bucket
         ORDER BY bucket
     """)
 
-    result = await session.execute(query, {
-        "step": step_seconds,
-        "ts_from": ts_from,
-        "ts_to": ts_to,
-    })
+    params = {"step": step_seconds, "ts_from": ts_from, "ts_to": ts_to}
+    if host_id is not None:
+        params["host_id"] = host_id
+
+    result = await session.execute(query, params)
     rows = result.fetchall()
 
     points = []
@@ -156,10 +180,12 @@ async def metrics_range(
 async def summary(
     session: AsyncSession = Depends(get_session),
     window: int = Query(60, ge=1, le=1440),
+    host_key: Optional[str] = Query(None),
 ):
     since = datetime.now(timezone.utc) - timedelta(minutes=window)
+    host_id = await _resolve_host_id(session, host_key)
 
-    query = select(
+    q = select(
         func.min(MetricsSample.cpu_percent),
         func.avg(MetricsSample.cpu_percent),
         func.max(MetricsSample.cpu_percent),
@@ -177,7 +203,10 @@ async def summary(
         func.max(MetricsSample.net_tx_bps),
     ).where(MetricsSample.ts_utc >= since)
 
-    result = await session.execute(query)
+    if host_id is not None:
+        q = q.where(MetricsSample.host_id == host_id)
+
+    result = await session.execute(q)
     row = result.one()
 
     if row[0] is None:
@@ -194,3 +223,65 @@ async def summary(
         net_rx_bps=sf(9),
         net_tx_bps=sf(12),
     )
+
+
+# ---------- 5) Hosts list (V2) ----------
+@router.get("/hosts", response_model=List[HostOut])
+async def list_hosts(session: AsyncSession = Depends(get_session)):
+    result = await session.execute(
+        select(Host).order_by(Host.last_seen_at.desc())
+    )
+    return result.scalars().all()
+
+
+# ---------- 6) Ingest (V2) ----------
+def _check_api_key(x_api_key: Optional[str] = Header(None)):
+    expected = settings.ingest_api_key
+    if expected and x_api_key != expected:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+@router.post("/ingest", response_model=IngestResponse)
+async def ingest(
+    payload: IngestPayload,
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(_check_api_key),
+):
+    now = datetime.now(timezone.utc)
+
+    # Upsert host
+    result = await session.execute(
+        select(Host).where(Host.host_key == payload.host_key)
+    )
+    host = result.scalar_one_or_none()
+    if host is None:
+        host = Host(
+            host_key=payload.host_key,
+            display_name=payload.host_key,
+            last_seen_at=now,
+        )
+        session.add(host)
+        await session.flush()
+    else:
+        host.last_seen_at = now
+
+    sample = MetricsSample(
+        host_id=host.id,
+        ts_utc=payload.ts_utc or now,
+        cpu_percent=payload.cpu_percent,
+        load_avg_1=payload.load_avg_1,
+        mem_used_bytes=payload.mem_used_bytes,
+        mem_total_bytes=payload.mem_total_bytes,
+        mem_percent=payload.mem_percent,
+        disk_used_bytes=payload.disk_used_bytes,
+        disk_total_bytes=payload.disk_total_bytes,
+        disk_percent=payload.disk_percent,
+        net_rx_bps=payload.net_rx_bps,
+        net_tx_bps=payload.net_tx_bps,
+        uptime_seconds=payload.uptime_seconds,
+    )
+    session.add(sample)
+    await session.commit()
+    await session.refresh(sample)
+
+    return IngestResponse(status="ok", host_key=payload.host_key, sample_id=sample.id)

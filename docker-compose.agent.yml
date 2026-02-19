@@ -1,0 +1,22 @@
+# docker-compose.agent.yml — Example for running agent on a remote device
+#
+# Usage:
+#   docker compose -f docker-compose.agent.yml up --build -d
+
+version: "3.9"
+
+services:
+  agent:
+    build: ./agent
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: ${BACKEND_URL} # e.g. https://your-backend.onrender.com
+      INGEST_API_KEY: ${INGEST_API_KEY} # must match backend's INGEST_API_KEY
+      HOST_KEY: ${HOST_KEY} # unique id for this machine, e.g. "laptop-1"
+      INTERVAL_SECONDS: ${INTERVAL_SECONDS:-2}
+    # Agent needs host PID namespace to read host metrics (not container metrics)
+    pid: host
+    # Network mode host for accurate network stats
+    network_mode: host
+    volumes:
+      - /:/host:ro

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import psutil
 
 from app.database import async_session
-from app.models import MetricsSample
+from app.models import MetricsSample, Host
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,6 @@ def _collect_snapshot() -> dict:
 
     # Uptime
     try:
-        uptime = now - 0  # psutil.boot_time gives epoch
         uptime = time.time() - psutil.boot_time()
     except Exception:
         uptime = None
@@ -68,6 +67,22 @@ def _collect_snapshot() -> dict:
     }
 
 
+async def _ensure_local_host(session) -> int:
+    """Ensure a 'local' host exists and return its id."""
+    from sqlalchemy import select
+    result = await session.execute(
+        select(Host).where(Host.host_key == "local")
+    )
+    host = result.scalar_one_or_none()
+    if host is None:
+        host = Host(host_key="local", display_name=settings.machine_name)
+        session.add(host)
+        await session.flush()
+    else:
+        host.last_seen_at = datetime.now(timezone.utc)
+    return host.id
+
+
 async def collector_loop(stop_event: asyncio.Event):
     """Collect metrics every COLLECTION_INTERVAL_SECONDS and persist."""
     interval = settings.collection_interval_seconds
@@ -80,6 +95,8 @@ async def collector_loop(stop_event: asyncio.Event):
         try:
             snapshot = await asyncio.get_event_loop().run_in_executor(None, _collect_snapshot)
             async with async_session() as session:
+                host_id = await _ensure_local_host(session)
+                snapshot["host_id"] = host_id
                 session.add(MetricsSample(**snapshot))
                 await session.commit()
         except Exception:

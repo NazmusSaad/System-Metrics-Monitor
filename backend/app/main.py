@@ -21,15 +21,20 @@ stop_event = asyncio.Event()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting metrics collector for '%s'", settings.machine_name)
-    task = asyncio.create_task(collector_loop(stop_event))
+    task = None
+    if settings.enable_local_collector:
+        logger.info("Starting local metrics collector for '%s'", settings.machine_name)
+        task = asyncio.create_task(collector_loop(stop_event))
+    else:
+        logger.info("Local collector disabled (ENABLE_LOCAL_COLLECTOR=false)")
     yield
-    logger.info("Shutting down collector")
-    stop_event.set()
-    await task
+    if task is not None:
+        logger.info("Shutting down collector")
+        stop_event.set()
+        await task
 
 
-app = FastAPI(title="System Metrics Monitor", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="System Metrics Monitor", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
     LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Area, AreaChart,
 } from "recharts";
-import { fetchLatest, fetchRange, fetchSummary } from "./api";
-import type { LatestResponse, MetricsSample, SummaryResponse } from "./types";
+import { fetchLatest, fetchRange, fetchSummary, fetchHosts } from "./api";
+import type { LatestResponse, MetricsSample, SummaryResponse, Host } from "./types";
 
 /* ── helpers ─────────────────────────────────────── */
 
@@ -92,39 +92,59 @@ export default function App() {
     const [range, setRange] = useState(60);
     const [live, setLive] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [hosts, setHosts] = useState<Host[]>([]);
+    const [selectedHost, setSelectedHost] = useState<string | null>(null);
     const liveRef = useRef(live);
     liveRef.current = live;
+
+    // Fetch hosts list
+    useEffect(() => {
+        fetchHosts().then((h) => {
+            setHosts(h);
+            if (h.length > 0 && selectedHost === null) {
+                setSelectedHost(h[0].host_key);
+            }
+        }).catch(() => { });
+    }, []);
+
+    // Refresh host list periodically (every 30s)
+    useEffect(() => {
+        const id = setInterval(() => {
+            fetchHosts().then(setHosts).catch(() => { });
+        }, 30000);
+        return () => clearInterval(id);
+    }, []);
 
     // Fetch latest
     const loadLatest = useCallback(async () => {
         try {
-            const d = await fetchLatest();
+            const d = await fetchLatest(selectedHost);
             setLatest(d);
             setError(null);
         } catch (e: any) {
             setError(e.message);
         }
-    }, []);
+    }, [selectedHost]);
 
     // Fetch history
     const loadHistory = useCallback(async () => {
         try {
             const now = new Date();
             const from = new Date(now.getTime() - range * 60_000);
-            const data = await fetchRange(from.toISOString(), now.toISOString(), stepForRange(range));
+            const data = await fetchRange(from.toISOString(), now.toISOString(), stepForRange(range), selectedHost);
             setHistory(data.points);
         } catch { }
-    }, [range]);
+    }, [range, selectedHost]);
 
     // Fetch summary
     const loadSummary = useCallback(async () => {
         try {
-            const d = await fetchSummary(range);
+            const d = await fetchSummary(range, selectedHost);
             setSummary(d);
         } catch { }
-    }, [range]);
+    }, [range, selectedHost]);
 
-    // Initial + range change
+    // Initial + range/host change
     useEffect(() => {
         loadLatest();
         loadHistory();
@@ -143,7 +163,8 @@ export default function App() {
         return () => clearInterval(id);
     }, [live, loadLatest, loadHistory]);
 
-    const machineName = latest ? "System Metrics Monitor" : "System Metrics Monitor";
+    const currentHost = hosts.find((h) => h.host_key === selectedHost);
+    const displayName = currentHost?.display_name || selectedHost || "System Metrics Monitor";
     const health = latest?.health;
 
     return (
@@ -156,12 +177,27 @@ export default function App() {
                             📊
                         </div>
                         <div>
-                            <h1 className="text-lg font-bold text-white leading-tight">{machineName}</h1>
-                            <p className="text-xs text-slate-400">Real-time host monitoring</p>
+                            <h1 className="text-lg font-bold text-white leading-tight">System Metrics Monitor</h1>
+                            <p className="text-xs text-slate-400">{displayName}</p>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-3">
+                        {/* host selector */}
+                        {hosts.length > 0 && (
+                            <select
+                                value={selectedHost || ""}
+                                onChange={(e) => setSelectedHost(e.target.value || null)}
+                                className="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            >
+                                {hosts.map((h) => (
+                                    <option key={h.host_key} value={h.host_key}>
+                                        {h.display_name} ({h.host_key})
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+
                         {/* health badge */}
                         {health && (
                             <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${badgeColors[health.overall]}`}>
@@ -176,8 +212,8 @@ export default function App() {
                                     key={r.label}
                                     onClick={() => setRange(r.minutes)}
                                     className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${range === r.minutes
-                                            ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
-                                            : "text-slate-400 hover:text-white"
+                                        ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
+                                        : "text-slate-400 hover:text-white"
                                         }`}
                                 >
                                     {r.label}
@@ -189,8 +225,8 @@ export default function App() {
                         <button
                             onClick={() => setLive((v) => !v)}
                             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${live
-                                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                                    : "bg-slate-800 text-slate-400 border-slate-700"
+                                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                : "bg-slate-800 text-slate-400 border-slate-700"
                                 }`}
                         >
                             <span className={`w-2 h-2 rounded-full ${live ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
@@ -344,7 +380,7 @@ export default function App() {
             </main>
 
             <footer className="border-t border-slate-800 py-4 text-center text-xs text-slate-500">
-                System Metrics Monitor V1
+                System Metrics Monitor V2
             </footer>
         </div>
     );

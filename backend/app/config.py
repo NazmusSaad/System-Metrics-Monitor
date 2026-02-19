@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     disk_warn: float = 85
     disk_crit: float = 95
 
+    # V2: multi-device
+    ingest_api_key: str = ""  # required in production; empty = no auth
+    enable_local_collector: bool = True
+
     class Config:
         env_file = ".env"
 
