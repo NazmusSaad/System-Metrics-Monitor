@@ -1,0 +1,9 @@
+services:
+  agent:
+    build: ./agent
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: ${BACKEND_URL}
+      INGEST_API_KEY: ${INGEST_API_KEY}
+      HOST_KEY: ${HOST_KEY}
+      INTERVAL_SECONDS: ${INTERVAL_SECONDS:-2}
