@@ -6,7 +6,7 @@ A self-hostable, real-time system metrics dashboard with multi-device monitoring
 
 ## UI Preview
 
-![App screenshot](https://github.com/NazmusSaad/System-Metrics-Monitor/blob/master/system_metrics_v1_pic1.png)
+![App screenshot](https://github.com/NazmusSaad/System-Metrics-Monitor/blob/master/system_metrics_v1_pic3.png)
 ![App screenshot](https://github.com/NazmusSaad/System-Metrics-Monitor/blob/master/system_metrics_v1_pic2.png)
 
 ## Features
