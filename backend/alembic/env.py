@@ -1,6 +1,7 @@
 import os
 import sys
 from logging.config import fileConfig
+from urllib.parse import urlparse, parse_qs
 
 # Ensure the backend root is on the path so 'app' package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,6 +26,15 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def _get_sync_connect_args(url: str) -> dict:
+    """Build connect_args with SSL for psycopg2 if sslmode is in the URL."""
+    parsed = urlparse(url)
+    qs = parse_qs(parsed.query)
+    if qs.get("sslmode", [None])[0] in ("require", "verify-ca", "verify-full"):
+        return {"sslmode": "require"}
+    return {}
+
+
 def run_migrations_offline():
     url = config.get_main_option("sqlalchemy.url")
     context.configure(url=url, target_metadata=target_metadata, literal_binds=True)
@@ -37,6 +47,7 @@ def run_migrations_online():
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=_get_sync_connect_args(sync_url),
     )
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)

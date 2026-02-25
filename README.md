@@ -170,3 +170,16 @@ metrics-monitor/
 ### Railway / Render / Fly.io
 
 Each service (frontend, backend, db) can be deployed as a separate service on any Docker-capable PaaS. Set environment variables in the platform dashboard.
+
+### Azure (Container Apps + Azure Postgres)
+
+Deploy the backend to Azure Container Apps with a managed PostgreSQL database:
+
+```powershell
+# Automated (PowerShell)
+.\infra\azure\deploy.ps1
+
+# Or follow the full step-by-step guide
+```
+
+See **[docs/AZURE_DEPLOY.md](docs/AZURE_DEPLOY.md)** for the complete Azure CLI deployment guide, including ACR image publishing, SSL configuration, agent setup, and cost estimates.
